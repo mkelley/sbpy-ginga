@@ -1,10 +1,5 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-"""A Ginga local plugin for cometary morphological enhancements.
-
-With sbpy installed, this plugin should be automatically discovered by
-Ginga and available in the Operations menu.
-
-"""
+"""A Ginga local plugin for cometary morphological enhancements."""
 
 from warnings import warn
 from ginga.GingaPlugin import LocalPlugin
@@ -20,7 +15,6 @@ except ImportError:
         OptionalPackageUnavailable,
     )
     centroid_2dg = None
-
 
 
 class CometaryEnhancements(LocalPlugin):
