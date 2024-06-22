@@ -1,0 +1,35 @@
+[project]
+name = "sbpy-ginga"
+description = "Ginga image viewer plugins from sbpy"
+readme = "README.rst"
+authors = [{ name = "Michael S. P. Kelley", email = "msk@astro.umd.edu" }]
+license = { text = "BSD 3-Clause License" }
+dependencies = ["sbpy>0.4", "ginga>5"]
+dynamic = ["version"]
+
+[project.urls]
+homepage = "https://sbpy.org"
+
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = 'setuptools.build_meta'
+
+[project.optional-dependencies]
+recommended = ["photutils>=1.12"]
+docs = ["sphinx-astropy>=1.9.1"]
+test = ["pytest", "pytest-doctestplus"]
+
+[project.entry-points."ginga.rv.plugins"]
+CometaryEnhancements = "sbpy_ginga:setup_cometaryenhancements"
+
+[tool.setuptools_scm]
+write_to = "sbpy_ginga/_version.py"
+
+[tool.setuptools]
+zip-safe = false
+
+[tool.setuptools.packages.find]
+
+[tool.pytest.ini_options]
+addopts = "-v --doctest-rst"
+doctest_plus = "enabled"
