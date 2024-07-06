@@ -1,24 +1,21 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 """A Ginga local plugin for cometary morphological enhancements."""
 
-from warnings import warn
+__all__ = ["CometaryEnhancements"]
+
 from ginga.GingaPlugin import LocalPlugin
 from ginga.gw import Widgets
-from sbpy.exceptions import OptionalPackageUnavailable
+from sbpy.utils import optional_packages
 from sbpy.imageanalysis import CometaryEnhancement
 
 try:
     from photutils.centroids import centroid_2dg
 except ImportError:
-    warn(
-        "photutils is not present: CometaryEnhancements centroiding disabled.",
-        OptionalPackageUnavailable,
-    )
     centroid_2dg = None
 
 
 class CometaryEnhancements(LocalPlugin):
-    """Ginga plugin for on-the-fly cometary image enhancements."""
+    """Ginga plugin for interactive cometary image enhancements."""
 
     def __init__(self, fv, fitsimage):
         """
@@ -92,7 +89,9 @@ class CometaryEnhancements(LocalPlugin):
         )
         b.use_fov_center.add_callback("activated", self.use_fov_center_callback)
         # centroiding requires photutils
-        if centroid_2dg:
+        if optional_packages(
+            "photutils", message="CometaryEnhancements centroiding disabled."
+        ):
             b.centroid.add_callback("activated", self.centroid_callback)
             b.centroid_box.set_text("11")
         else:
@@ -144,6 +143,7 @@ class CometaryEnhancements(LocalPlugin):
         # cw.addWidget(widget, stretch=1)
 
     def rho_callback(self, w):
+        """Generate a new image based on the 1/rho normalization."""
         try:
             xc = float(self.w.x_center.get_text())
             yc = float(self.w.y_center.get_text())
@@ -165,6 +165,7 @@ class CometaryEnhancements(LocalPlugin):
         self.fv.add_image("1/rho enhanced", new_image, chname=chname)
 
     def centroid_callback(self, w):
+        """Centroid on the current x, y center values."""
         im = self.fitsimage.get_image().get_data()
 
         try:
@@ -190,7 +191,7 @@ class CometaryEnhancements(LocalPlugin):
         self.w.y_center.set_text("{:.2f}".format(cxy[1] + y0))
 
     def use_fov_center_callback(self, w):
-        """Use the field of view center for the enhancement."""
+        """Use the field of view center for the enhancement center."""
         xy = self.fv.get_viewer(self.chname).get_pan()
         self.w.x_center.set_text("{:.2f}".format(xy[0]))
         self.w.y_center.set_text("{:.2f}".format(xy[1]))

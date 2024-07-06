@@ -21,6 +21,7 @@ test = ["pytest", "pytest-doctestplus"]
 
 [project.entry-points."ginga.rv.plugins"]
 CometaryEnhancements = "sbpy_ginga:setup_cometaryenhancements"
+Astrometry = "sbpy_ginga:setup_astrometry"
 
 [tool.setuptools_scm]
 write_to = "sbpy_ginga/_version.py"
