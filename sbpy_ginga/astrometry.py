@@ -8,7 +8,7 @@ Based on Ginga's Pick tool.
 
 __all__ = ["Astrometry"]
 
-from typing import Tuple
+from typing import List, Optional, Tuple, Union
 import numpy as np
 from ginga.GingaPlugin import LocalPlugin
 from ginga.gw import Widgets
@@ -16,7 +16,9 @@ from ginga import ImageView
 from ginga.canvas.CanvasObject import CanvasObjectBase
 from ginga.canvas.types.layer import DrawingCanvas
 from ginga.canvas.types.basic import Point, Text
+from ginga.misc import Bunch
 from ginga.util import wcs
+from ginga.util.vip import ViewerImageProxy
 from sbpy.utils import optional_packages
 
 try:
@@ -290,6 +292,25 @@ class Astrometry(LocalPlugin):
         ):
             self.centering_methods.extend(["2D Gaussian"])
 
+        # header keywords for metadata, include an empty string in each list
+        self.date_keywords: List[str] = sorted(
+            [
+                "",
+                "OBSDATE",
+                "DATEOBS",
+                "OBS-DATE",
+                "DATE-OBS",
+            ]
+        )
+
+        self.target_keywords: List[str] = sorted(
+            [
+                "",
+                "TARGET",
+                "OBJECT",
+            ]
+        )
+
         # get preferences
         prefs = self.fv.get_preferences()
         self.settings = prefs.create_category("plugin_sbpy_Astrometry")
@@ -299,10 +320,6 @@ class Astrometry(LocalPlugin):
 
         self.region_width = CenteringRegion.region_default_width
         self.region_height = CenteringRegion.region_default_height
-
-        # Initialize metadata
-        self.target = ""
-        self.observer_location = ""
 
         # drawing canvas for image annotations
         self.draw_classes = self.fv.get_draw_classes()
@@ -344,19 +361,83 @@ class Astrometry(LocalPlugin):
                 "2D Gaussian" if "2D Gaussian" in self.centering_methods else "peak"
             )
 
-    def create_change_value_callback(self, attribute_name, type=str):
+    @property
+    def target(self) -> str:
+        return self.w.label_target.get_text()
+
+    @target.setter
+    def target(self, value):
+        self.w.label_target.set_text(str(value))
+
+    @property
+    def date(self) -> str:
+        return self.w.label_date.get_text()
+
+    @date.setter
+    def date(self, value):
+        self.w.label_date.set_text(str(value))
+
+    @property
+    def observer_location(self) -> str:
+        return ""
+
+    @property
+    def target_keyword(self) -> str:
+        return self.w.label_target_keyword.get_text()
+
+    @target_keyword.setter
+    def target_keyword(self, keyword: str):
+        keyword = keyword.upper()
+
+        self.w.label_target_keyword.set_text(keyword)
+
+        if keyword not in self.target_keywords:
+            self.target_keywords.append(keyword)
+            self.w.target_keyword_combobox.append_text(keyword)
+        self.w.target_keyword_combobox.set_text(keyword)
+
+    @property
+    def autofill_target(self) -> bool:
+        return self.w.autofill_target.get_state()
+
+    @autofill_target.setter
+    def autofill_target(self, value: bool):
+        self.w.autofill_target.set_state(value)
+
+    @property
+    def date_keyword(self) -> str:
+        return self.w.label_date_keyword.get_text()
+
+    @date_keyword.setter
+    def date_keyword(self, keyword: str):
+        keyword = keyword.upper()
+
+        self.w.label_date_keyword.set_text(keyword)
+
+        if keyword not in self.date_keywords:
+            self.date_keywords.append(keyword)
+            self.w.date_keyword_combobox.append_text(keyword)
+        self.w.date_keyword_combobox.set_text(keyword)
+
+    @property
+    def autofill_date(self) -> bool:
+        return self.w.autofill_date.get_state()
+
+    @autofill_date.setter
+    def autofill_date(self, value: bool):
+        self.w.autofill_date.set_state(value)
+
+    def _create_change_value_callback(self, attribute_name, type=str):
         """Create a basic callback that updates a value and associated label."""
 
         def callback(widget, value):
-            setattr(self, attribute_name, type(value))
-            getattr(self.w, "label_" + attribute_name).set_text(
-                str(getattr(self, attribute_name))
-            )
+            self.w[attribute_name].set_text(str(type(value)))
+            self.w["label_" + attribute_name].set_text(str(self.w[attribute_name]))
             return True
 
         return callback
 
-    def create_entry_callback(self, attribute_name, type=str):
+    def _create_entry_callback(self, attribute_name, type=str):
         """Create a basic entry callback that updates a value and associated label."""
 
         default_value = ""
@@ -370,11 +451,44 @@ class Astrometry(LocalPlugin):
             widget_value = widget.get_text().strip()
             if len(widget_value) > 0:
                 value = type(widget_value)
-            setattr(self, attribute_name, value)
-            getattr(self.w, "label_" + attribute_name).set_text(str(value))
+            self.w[f"{attribute_name}_entry"].set_text(value)
+            self.w[f"label_{attribute_name}"].set_text(str(value))
             return True
 
         return callback
+
+    def _setup_header_autofill(self, bunch: Bunch, name: str) -> None:
+        """Setup a checkbox, entry, and combobox to autofill a header value."""
+
+        autofill: str = f"autofill_{name}"
+        header_keyword: str = f"{name}_keyword"
+        keywords: List[str] = getattr(self, f"{name}_keywords")
+        combobox: Widgets.ComboBox = bunch[f"{name}_keyword_combobox"]
+
+        bunch[f"label_{name}_keyword"].set_text("")
+        bunch[autofill].set_state(False)
+        for k in keywords:
+            combobox.append_text(k)
+
+        def activate_entry_callback(widget):
+            keyword: str = widget.get_text()
+            setattr(self, header_keyword, keyword)
+            setattr(self, autofill, keyword != "")
+            self.auto_update_metadata(autofill)
+            return True
+
+        self.w[f"{name}_keyword_entry"].add_callback(
+            "activated", activate_entry_callback
+        )
+
+        def activate_combobox_callback(widget, index):
+            keyword: str = keywords[index]
+            setattr(self, header_keyword, keyword)
+            setattr(self, autofill, keyword != "")
+            self.auto_update_metadata(autofill)
+            return True
+
+        combobox.add_callback("activated", activate_combobox_callback)
 
     def build_gui(self, container):
         """
@@ -434,6 +548,7 @@ class Astrometry(LocalPlugin):
             (
                 ("Use view center", "button"),
                 ("Centroid", "button"),
+                ("Add", "button"),
             )
         )
 
@@ -470,6 +585,8 @@ class Astrometry(LocalPlugin):
 
         bunch.centroid.add_callback("activated", centroid_callback)
 
+        bunch.add.set_tooltip("Add this position to the report")
+
         self.w.update(bunch)
         hbox.add_widget(widget)
 
@@ -488,7 +605,7 @@ class Astrometry(LocalPlugin):
                 "label",
                 "label_target",
                 "label",
-                "target",
+                "target_entry",
                 "entry",
             ),
             (
@@ -496,35 +613,52 @@ class Astrometry(LocalPlugin):
                 "label",
                 "label_observer_location",
                 "label",
-                "observer location",
+                "observer_location_entry",
+                "entry",
+            ),
+            (
+                "Date:",
+                "label",
+                "label_date",
+                "label",
+                "date_entry",
                 "entry",
             ),
         )
         widget, bunch = Widgets.build_info(widget)
         self.w.update(bunch)
 
-        # Metadata tab: object
-        change_target = self.create_entry_callback("target")
-        bunch.label_target.set_text(str(self.target))
-        bunch.target.add_callback("activated", change_target)
+        # Metadata tab: target
+        bunch.label_target.set_text("")
+        change_target_callback = self._create_entry_callback("target")
+        bunch.target_entry.add_callback("activated", change_target_callback)
 
         # Metadata tab: observer location
-        change_observer_location = self.create_entry_callback("observer_location")
         bunch.label_observer_location.set_text(str(self.observer_location))
-        bunch.observer_location.add_callback("activated", change_observer_location)
+        change_observer_location_callback = self._create_entry_callback(
+            "observer_location"
+        )
+        bunch.observer_location_entry.add_callback(
+            "activated", change_observer_location_callback
+        )
+
+        # Metadata tab: date
+        bunch.label_date.set_text("")
+        change_date_callback = self._create_entry_callback("date")
+        bunch.date_entry.add_callback("activated", change_date_callback)
 
         metadata_vbox.add_widget(widget)
         tab_widget.add_widget(metadata_vbox, title="Metadata")
 
         # Settings tab
         settings_vbox = Widgets.VBox()
-        widget = (
+        design = (
             (
                 "Region type:",
                 "label",
                 "label_region_type",
                 "label",
-                "region type",
+                "region_type",
                 "combobox",
             ),
             (
@@ -532,7 +666,7 @@ class Astrometry(LocalPlugin):
                 "label",
                 "label_max_region_size",
                 "label",
-                "Max region size",
+                "max_region_size",
                 "spinbutton",
             ),
             (
@@ -543,8 +677,44 @@ class Astrometry(LocalPlugin):
                 "Centering method",
                 "combobox",
             ),
+            (
+                "Target keyword:",
+                "label",
+                "label_target_keyword",
+                "label",
+                "target_keyword_entry",
+                "entry",
+            ),
+            (
+                "",
+                "label",
+                "",
+                "label",
+                "Autofill target",
+                "checkbox",
+                "target_keyword_combobox",
+                "combobox",
+            ),
+            (
+                "Date keyword:",
+                "label",
+                "label_date_keyword",
+                "label",
+                "date_keyword_entry",
+                "entry",
+            ),
+            (
+                "",
+                "label",
+                "",
+                "label",
+                "Autofill date",
+                "checkbox",
+                "date_keyword_combobox",
+                "combobox",
+            ),
         )
-        widget, bunch = Widgets.build_info(widget, orientation=orientation)
+        widget, bunch = Widgets.build_info(design, orientation=orientation)
         self.w.update(bunch)
 
         # Settings tab: region type
@@ -567,14 +737,12 @@ class Astrometry(LocalPlugin):
         bunch.max_region_size.set_limits(5, 10000, incr_value=10)
         bunch.max_region_size.set_value(self.max_region_size)
         bunch.label_max_region_size.set_text(str(self.max_region_size))
-        change_max_region_size = self.create_change_value_callback(
+        change_max_region_size_callback = self._create_change_value_callback(
             "max_region_size", int
         )
-        bunch.max_region_size.add_callback("value-changed", change_max_region_size)
-
-        settings_vbox.add_widget(widget)
-        tab_widget.add_widget(settings_vbox, title="Settings")
-        vbox.add_widget(tab_widget)
+        bunch.max_region_size.add_callback(
+            "value-changed", change_max_region_size_callback
+        )
 
         # Settings tab: centering method
         def change_centering_method(w, index):
@@ -590,6 +758,17 @@ class Astrometry(LocalPlugin):
         combobox.set_index(index)
         bunch.label_centering_method.set_text(self.centering_method)
         combobox.add_callback("activated", change_centering_method)
+
+        # Settings tab: autofill target
+        self._setup_header_autofill(bunch, "target")
+
+        # Settings tab: autofill date
+        self._setup_header_autofill(bunch, "date")
+
+        # Finish settings tab
+        settings_vbox.add_widget(widget)
+        tab_widget.add_widget(settings_vbox, title="Settings")
+        vbox.add_widget(tab_widget)
 
         # scroll bars will allow lots of content to be accessed
         top.add_widget(scroll_widget, stretch=1)
@@ -608,25 +787,7 @@ class Astrometry(LocalPlugin):
         # Add our GUI to the container
         container.add_widget(top, stretch=1)
 
-    def draw_callback(self, canvas, tag: str):
-        """Create a new region based on the shape referenced by tag.
-
-        If the shape is not an allowed region type, then the shape is deleted,
-        and nothing is created.
-
-        """
-
-        shape: CanvasObjectBase = canvas.get_object_by_tag(tag)
-        canvas.delete_object_by_tag(tag)
-
-        if shape.kind not in self.region_types:
-            return True
-
-        if self.region is not None:
-            self.region = None
-
-        self.region = CenteringRegion(shape, self.fitsimage, self.canvas)
-        self.recenter_region_peak()
+        self.auto_update_metadata()
 
     def move_region(self, x: float, y: float) -> None:
         """Move the region to x, y and update the image data."""
@@ -660,6 +821,81 @@ class Astrometry(LocalPlugin):
         """Re-center the region peak."""
         x, y = self.region.centroid(self.w.centering_method.get_text())
         self.move_region_peak(x, y)
+
+    def auto_update_metadata(self, name: Optional[str] = None):
+        """Auto-update astrometric metadata.
+
+
+        Parameters
+        ----------
+        name : str, optional
+            Only update this item.
+
+        """
+
+        vip: ViewerImageProxy = self.fitsimage.get_vip()
+        point = self.fv.get_viewer(self.chname).get_pan()
+        image, point2 = vip.get_image_at_pt(point)
+
+        keyword: str
+        names: List[str] = []
+        if name is None:
+            names.extend(["autofill_target", "autofill_date"])
+        else:
+            names.append(name)
+
+        def search_for_keyword(keywords: List[str], image) -> str:
+            """Raises KeyError if no keyword is found in the image metadata."""
+            keyword: str
+            for keyword in keywords:
+                if image.get_keyword(keyword, None) is not None:
+                    return keyword
+            raise KeyError
+
+        def autofill(name: str, image) -> None:
+            """Checks metadata for current keyword and updates attribute `name`.
+
+            If the current keyword is "", the header will be searched for a
+            valid keyword.
+
+            """
+
+            keyword: str = getattr(self, f"{name}_keyword")
+            keywords: List[str] = getattr(self, f"{name}_keywords")
+
+            try:
+                if keyword == "":
+                    keyword = search_for_keyword(keywords, image)
+                    setattr(self, f"{name}_keyword", keyword)
+                setattr(self, name, image.get_keyword(keyword))
+            except KeyError:
+                pass
+
+        if "autofill_target" in names and self.autofill_target:
+            autofill("target", image)
+
+        if "autofill_date" in names and self.autofill_date:
+            autofill("date", image)
+
+    def draw_callback(self, canvas, tag: str):
+        """Create a new region based on the shape referenced by tag.
+
+        If the shape is not an allowed region type, then the shape is deleted,
+        and nothing is created.
+
+        """
+
+        shape: CanvasObjectBase = canvas.get_object_by_tag(tag)
+        canvas.delete_object_by_tag(tag)
+
+        if shape.kind not in self.region_types:
+            return True
+
+        if self.region is not None:
+            self.region = None
+
+        self.region = CenteringRegion(shape, self.fitsimage, self.canvas)
+        self.recenter_region_peak()
 
     def edit_callback(self, canvas, obj):
         if obj.kind not in self.region_types:
@@ -800,6 +1036,8 @@ class Astrometry(LocalPlugin):
         called many times as new images are loaded while the plugin is
         active.  This method may be omitted.
         """
+
+        self.auto_update_metadata()
 
     def __str__(self):
         """
