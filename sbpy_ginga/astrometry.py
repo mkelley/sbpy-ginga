@@ -8,7 +8,7 @@ Based on Ginga's Pick tool.
 
 __all__ = ["Astrometry"]
 
-from typing import List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 import numpy as np
 from ginga.GingaPlugin import LocalPlugin
 from ginga.gw import Widgets
@@ -178,6 +178,9 @@ class CenteringRegion:
 
     def get_peak_value(self) -> float:
         """Image value at the center pixel."""
+
+        if self.data.size == 0:
+            return 0
 
         x1: int
         y1: int
@@ -362,12 +365,28 @@ class Astrometry(LocalPlugin):
             )
 
     @property
-    def target(self) -> str:
-        return self.w.label_target.get_text()
+    def autofill_target(self) -> bool:
+        return self.w.autofill_target.get_state()
 
-    @target.setter
-    def target(self, value):
-        self.w.label_target.set_text(str(value))
+    @autofill_target.setter
+    def autofill_target(self, value: bool):
+        self.w.autofill_target.set_state(value)
+
+    @property
+    def autofill_date(self) -> bool:
+        return self.w.autofill_date.get_state()
+
+    @autofill_date.setter
+    def autofill_date(self, value: bool):
+        self.w.autofill_date.set_state(value)
+
+    @property
+    def auto_levels(self) -> bool:
+        return self.w.auto_levels.get_state()
+
+    @auto_levels.setter
+    def auto_levels(self, value: bool):
+        self.w.auto_levels.set_state(value)
 
     @property
     def date(self) -> str:
@@ -376,33 +395,6 @@ class Astrometry(LocalPlugin):
     @date.setter
     def date(self, value):
         self.w.label_date.set_text(str(value))
-
-    @property
-    def observer_location(self) -> str:
-        return ""
-
-    @property
-    def target_keyword(self) -> str:
-        return self.w.label_target_keyword.get_text()
-
-    @target_keyword.setter
-    def target_keyword(self, keyword: str):
-        keyword = keyword.upper()
-
-        self.w.label_target_keyword.set_text(keyword)
-
-        if keyword not in self.target_keywords:
-            self.target_keywords.append(keyword)
-            self.w.target_keyword_combobox.append_text(keyword)
-        self.w.target_keyword_combobox.set_text(keyword)
-
-    @property
-    def autofill_target(self) -> bool:
-        return self.w.autofill_target.get_state()
-
-    @autofill_target.setter
-    def autofill_target(self, value: bool):
-        self.w.autofill_target.set_state(value)
 
     @property
     def date_keyword(self) -> str:
@@ -420,12 +412,31 @@ class Astrometry(LocalPlugin):
         self.w.date_keyword_combobox.set_text(keyword)
 
     @property
-    def autofill_date(self) -> bool:
-        return self.w.autofill_date.get_state()
+    def observer_location(self) -> str:
+        return ""
 
-    @autofill_date.setter
-    def autofill_date(self, value: bool):
-        self.w.autofill_date.set_state(value)
+    @property
+    def target(self) -> str:
+        return self.w.label_target.get_text()
+
+    @target.setter
+    def target(self, value):
+        self.w.label_target.set_text(str(value))
+
+    @property
+    def target_keyword(self) -> str:
+        return self.w.label_target_keyword.get_text()
+
+    @target_keyword.setter
+    def target_keyword(self, keyword: str):
+        keyword = keyword.upper()
+
+        self.w.label_target_keyword.set_text(keyword)
+
+        if keyword not in self.target_keywords:
+            self.target_keywords.append(keyword)
+            self.w.target_keyword_combobox.append_text(keyword)
+        self.w.target_keyword_combobox.set_text(keyword)
 
     def _create_change_value_callback(self, attribute_name, type=str):
         """Create a basic callback that updates a value and associated label."""
@@ -674,8 +685,16 @@ class Astrometry(LocalPlugin):
                 "label",
                 "label_centering_method",
                 "label",
-                "Centering method",
+                "centering_method",
                 "combobox",
+            ),
+            (
+                "Auto levels:",
+                "label",
+                "",
+                "label",
+                "auto_levels",
+                "checkbox",
             ),
             (
                 "Target keyword:",
@@ -759,6 +778,17 @@ class Astrometry(LocalPlugin):
         bunch.label_centering_method.set_text(self.centering_method)
         combobox.add_callback("activated", change_centering_method)
 
+        # Settings tab: auto levels
+        bunch.auto_levels.set_tooltip(
+            "Automatically scale the image levels to the min/max value of the region"
+        )
+        bunch.auto_levels.set_state(True)
+
+        def activate_auto_levels(widget: Widgets.CheckBox, value: Any):
+            self.set_cut_levels()
+
+        bunch.auto_levels.add_callback("activated", activate_auto_levels)
+
         # Settings tab: autofill target
         self._setup_header_autofill(bunch, "target")
 
@@ -789,16 +819,28 @@ class Astrometry(LocalPlugin):
 
         self.auto_update_metadata()
 
+    def set_cut_levels(self) -> None:
+        """Set the image levels based on the region."""
+
+        if not self.auto_levels or self.region is None:
+            return
+
+        im: np.ma.MaskedArray = self.region.get_image_data()
+        self.fitsimage.cut_levels(np.nanmin(im), np.nanmax(im))
+
     def move_region(self, x: float, y: float) -> None:
         """Move the region to x, y and update the image data."""
+
         if self.region is None:
             return
 
         self.region.set_center_point(x, y)
         self.region.update_image_data()
+        self.set_cut_levels()
 
     def move_region_peak(self, x: float, y: float) -> None:
         """Move the region's center point and update the labels."""
+
         self.w.label_x_center.set_text(f"{x:.3f}")
         self.w.label_y_center.set_text(f"{y:.3f}")
         self.region.set_peak_point(x, y)
@@ -819,6 +861,7 @@ class Astrometry(LocalPlugin):
 
     def recenter_region_peak(self) -> None:
         """Re-center the region peak."""
+
         x, y = self.region.centroid(self.w.centering_method.get_text())
         self.move_region_peak(x, y)
 
@@ -892,9 +935,11 @@ class Astrometry(LocalPlugin):
             return True
 
         if self.region is not None:
+            del self.region
             self.region = None
 
         self.region = CenteringRegion(shape, self.fitsimage, self.canvas)
+        self.set_cut_levels()
         self.recenter_region_peak()
 
     def edit_callback(self, canvas, obj):
@@ -906,6 +951,7 @@ class Astrometry(LocalPlugin):
 
         if self.region.canvas_object.has_object(obj):
             self.region.update_image_data()
+            self.set_cut_levels()
             self.recenter_region_peak()
 
         return True
