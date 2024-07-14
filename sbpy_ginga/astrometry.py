@@ -147,8 +147,8 @@ class CenteringRegion:
         """Update the internal copy of the image data."""
         self.data = self.get_image_data()
 
-    def get_center_point(self) -> Tuple[float]:
-        """Get the region's center point.
+    def get_center(self) -> Tuple[float]:
+        """Get the region's center.
 
 
         Returns
@@ -159,24 +159,24 @@ class CenteringRegion:
 
         return self.shape.get_center_pt()
 
-    def set_center_point(self, x: float, y: float) -> None:
-        """Move the region to this center point."""
+    def set_center(self, x: float, y: float) -> None:
+        """Move the region to this center."""
 
         self.shape.move_to_pt((x, y))
         self.update_image_data()
         self.canvas.update_canvas()
 
-    def get_peak_point(self) -> Tuple[float, float]:
+    def get_center_point(self) -> Tuple[float, float]:
         """Get the peak marker's coordinates."""
 
         return self.peak.get_center_pt()
 
-    def set_peak_point(self, x: float, y: float) -> None:
-        """Set the peak marker's coordinates."""
+    def set_center_point(self, x: float, y: float) -> None:
+        """Set the center point's coordinates."""
         self.peak.move_to_pt((x, y))
         self.canvas.update_canvas()
 
-    def get_peak_value(self) -> float:
+    def get_center_point_value(self) -> float:
         """Image value at the center pixel."""
 
         if self.data.size == 0:
@@ -188,7 +188,7 @@ class CenteringRegion:
 
         x: float
         y: float
-        x, y = self.get_peak_point()
+        x, y = self.get_center_point()
 
         x -= x1
         y -= y1
@@ -592,7 +592,7 @@ class Astrometry(LocalPlugin):
             if self.region is None:
                 return
 
-            self.recenter_region_peak()
+            self.recenter_region()
 
         bunch.centroid.add_callback("activated", centroid_callback)
 
@@ -834,7 +834,7 @@ class Astrometry(LocalPlugin):
         if self.region is None:
             return
 
-        self.region.set_center_point(x, y)
+        self.region.set_center(x, y)
         self.region.update_image_data()
         self.set_cut_levels()
 
@@ -843,8 +843,10 @@ class Astrometry(LocalPlugin):
 
         self.w.label_x_center.set_text(f"{x:.3f}")
         self.w.label_y_center.set_text(f"{y:.3f}")
-        self.region.set_peak_point(x, y)
-        self.w.label_center_value.set_text(f"{self.region.get_peak_value():.6g}")
+        self.region.set_center_point(x, y)
+        self.w.label_center_value.set_text(
+            f"{self.region.get_center_point_value():.6g}"
+        )
 
         vip = self.fitsimage.get_vip()
         image, pt = vip.get_image_at_pt((x, y))
@@ -859,7 +861,7 @@ class Astrometry(LocalPlugin):
         self.w.label_ra_center.set_text(ra_txt)
         self.w.label_dec_center.set_text(dec_txt)
 
-    def recenter_region_peak(self) -> None:
+    def recenter_region(self) -> None:
         """Re-center the region peak."""
 
         x, y = self.region.centroid(self.w.centering_method.get_text())
@@ -940,7 +942,7 @@ class Astrometry(LocalPlugin):
 
         self.region = CenteringRegion(shape, self.fitsimage, self.canvas)
         self.set_cut_levels()
-        self.recenter_region_peak()
+        self.recenter_region()
 
     def edit_callback(self, canvas, obj):
         if obj.kind not in self.region_types:
@@ -952,7 +954,7 @@ class Astrometry(LocalPlugin):
         if self.region.canvas_object.has_object(obj):
             self.region.update_image_data()
             self.set_cut_levels()
-            self.recenter_region_peak()
+            self.recenter_region()
 
         return True
 
@@ -970,7 +972,7 @@ class Astrometry(LocalPlugin):
                 color=self.region_color,
             )
         else:
-            self.region.set_center_point(x, y)
+            self.region.set_center(x, y)
 
         return True
 
@@ -981,7 +983,7 @@ class Astrometry(LocalPlugin):
             return False
 
         self.move_region(x, y)
-        self.recenter_region_peak()
+        self.recenter_region()
 
         return True
 
@@ -991,7 +993,7 @@ class Astrometry(LocalPlugin):
         if self.region is None:
             return False
 
-        self.region.set_center_point(x, y)
+        self.region.set_center(x, y)
 
         return True
 
@@ -1083,7 +1085,10 @@ class Astrometry(LocalPlugin):
         active.  This method may be omitted.
         """
 
+        self.region.update_image_data()
         self.auto_update_metadata()
+        self.recenter_region()
+        self.set_cut_levels()
 
     def __str__(self):
         """
