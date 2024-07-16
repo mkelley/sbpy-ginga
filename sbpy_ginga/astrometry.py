@@ -8,6 +8,7 @@ Based on Ginga's Pick tool.
 
 __all__ = ["Astrometry"]
 
+from packaging.version import Version
 from typing import Any, List, Optional, Tuple, Union
 import numpy as np
 from ginga.GingaPlugin import LocalPlugin
@@ -19,6 +20,7 @@ from ginga.canvas.types.basic import Point, Text
 from ginga.misc import Bunch
 from ginga.util import wcs
 from ginga.util.vip import ViewerImageProxy
+from ginga import __version__ as ginga_version
 from sbpy.utils import optional_packages
 
 try:
@@ -406,11 +408,6 @@ class Astrometry(LocalPlugin):
 
         self.w.label_date_keyword.set_text(keyword)
 
-        if keyword not in self.date_keywords:
-            self.date_keywords.append(keyword)
-            self.w.date_keyword_combobox.append_text(keyword)
-        self.w.date_keyword_combobox.set_text(keyword)
-
     @property
     def observer_location(self) -> str:
         return ""
@@ -481,25 +478,17 @@ class Astrometry(LocalPlugin):
         for k in keywords:
             combobox.append_text(k)
 
-        def activate_entry_callback(widget):
+        def activate_callback(widget, *args):
             keyword: str = widget.get_text()
             setattr(self, header_keyword, keyword)
             setattr(self, autofill, keyword != "")
             self.auto_update_metadata(autofill)
             return True
 
-        self.w[f"{name}_keyword_entry"].add_callback(
-            "activated", activate_entry_callback
-        )
+        if Version(ginga_version) < Version("5.2.0-dev6"):
+            self.w[f"{name}_keyword_entry"].add_callback("activated", activate_callback)
 
-        def activate_combobox_callback(widget, index):
-            keyword: str = keywords[index]
-            setattr(self, header_keyword, keyword)
-            setattr(self, autofill, keyword != "")
-            self.auto_update_metadata(autofill)
-            return True
-
-        combobox.add_callback("activated", activate_combobox_callback)
+        combobox.add_callback("activated", activate_callback)
 
     def build_gui(self, container):
         """
@@ -696,43 +685,70 @@ class Astrometry(LocalPlugin):
                 "auto_levels",
                 "checkbox",
             ),
-            (
-                "Target keyword:",
-                "label",
-                "label_target_keyword",
-                "label",
-                "target_keyword_entry",
-                "entry",
-            ),
-            (
-                "",
-                "label",
-                "",
-                "label",
-                "Autofill target",
-                "checkbox",
-                "target_keyword_combobox",
-                "combobox",
-            ),
-            (
-                "Date keyword:",
-                "label",
-                "label_date_keyword",
-                "label",
-                "date_keyword_entry",
-                "entry",
-            ),
-            (
-                "",
-                "label",
-                "",
-                "label",
-                "Autofill date",
-                "checkbox",
-                "date_keyword_combobox",
-                "combobox",
-            ),
         )
+
+        if Version(ginga_version) < Version("5.2.0.dev6"):
+            design += (
+                (
+                    "Target keyword:",
+                    "label",
+                    "label_target_keyword",
+                    "label",
+                    "target_keyword_entry",
+                    "entry",
+                ),
+                (
+                    "",
+                    "label",
+                    "",
+                    "label",
+                    "Autofill target",
+                    "checkbox",
+                    "target_keyword_combobox",
+                    "combobox",
+                ),
+                (
+                    "Date keyword:",
+                    "label",
+                    "label_date_keyword",
+                    "label",
+                    "date_keyword_entry",
+                    "entry",
+                ),
+                (
+                    "",
+                    "label",
+                    "",
+                    "label",
+                    "Autofill date",
+                    "checkbox",
+                    "date_keyword_combobox",
+                    "combobox",
+                ),
+            )
+        else:
+            design += (
+                (
+                    "Target keyword:",
+                    "label",
+                    "label_target_keyword",
+                    "label",
+                    "target_keyword_combobox",
+                    "comboboxedit",
+                    "Autofill target",
+                    "checkbox",
+                ),
+                (
+                    "Date keyword:",
+                    "label",
+                    "label_date_keyword",
+                    "label",
+                    "date_keyword_combobox",
+                    "comboboxedit",
+                    "Autofill date",
+                    "checkbox",
+                ),
+            )
         widget, bunch = Widgets.build_info(design, orientation=orientation)
         self.w.update(bunch)
 
