@@ -8,11 +8,15 @@ Based on Ginga's Pick tool.
 
 __all__ = ["Astrometry"]
 
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
+
 import numpy as np
+from astropy.coordinates import Angle
+
 from ginga.GingaPlugin import LocalPlugin
 from ginga.gw import Widgets
 from ginga import ImageView
+from ginga.rv.Control import GingaShell
 from ginga.canvas.CanvasObject import CanvasObjectBase
 from ginga.canvas.types.layer import DrawingCanvas
 from ginga.canvas.types.basic import Point, Text
@@ -25,6 +29,10 @@ try:
     from photutils.centroids import centroid_2dg
 except ImportError:
     centroid_2dg = None
+
+
+class RegionImageBoundsError(Exception):
+    "A value is outside the region's image data."
 
 
 class CenteringRegion:
@@ -167,12 +175,50 @@ class CenteringRegion:
         self.canvas.update_canvas()
 
     def get_center_point(self) -> Tuple[float, float]:
-        """Get the peak marker's coordinates."""
+        """Get the center marker's coordinates.
+
+
+        Returns
+        -------
+        x, y : float
+
+        """
 
         return self.peak.get_center_pt()
 
     def set_center_point(self, x: float, y: float) -> None:
-        """Set the center point's coordinates."""
+        """Set the center point's coordinates.
+
+
+        Raises
+        """
+
+        x1: int
+        y1: int
+        x2: int
+        y2: int
+        x1, y1, x2, y2 = self.get_llur()
+
+        invalid_coordinates = any(
+            [
+                x < x1,
+                x > x2,
+                y < y1,
+                y > y2,
+                ~np.isfinite(x),
+                ~np.isfinite(y),
+            ]
+        )
+
+        if invalid_coordinates:
+            self.peak.move_to_pt(self.get_center())
+            self.peak.alpha = 0
+            self.canvas.update_canvas()
+            raise RegionImageBoundsError(
+                f"Requested center ({x:.1f}, {y:.1f}) is outside of the image data."
+            )
+
+        self.peak.alpha = 1
         self.peak.move_to_pt((x, y))
         self.canvas.update_canvas()
 
@@ -184,16 +230,36 @@ class CenteringRegion:
 
         x1: int
         y1: int
-        x1, y1 = self.get_llur()[:2]
+        x2: int
+        y2: int
+        x1, y1, x2, y2 = self.get_llur()
 
         x: float
         y: float
         x, y = self.get_center_point()
 
+        invalid_coordinates = any(
+            [
+                x < x1,
+                x > x2,
+                y < y1,
+                y > y2,
+                ~np.isfinite(x),
+                ~np.isfinite(y),
+            ]
+        )
+        if invalid_coordinates:
+            raise RegionImageBoundsError(
+                f"Center point ({x}, {y}) is outside the region image."
+            )
+
         x -= x1
         y -= y1
 
-        return float(self.data[int(round(y)), int(round(x))])
+        x = int(round(x))
+        y = int(round(y))
+
+        return float(self.data[y, x])
 
     def get_llur(self) -> Tuple[float]:
         """Get the region's lower-left and upper-right coordinates.
@@ -250,6 +316,31 @@ class CenteringRegion:
         return float(x), float(y)
 
 
+class AstrometricReport:
+    """Astrometry and associated metadata."""
+
+    def __init__(self, tree_view):
+        self.tree_view: Widgets.TreeView = tree_view
+        self._report: Dict[str, Dict[str, Any]] = {}
+
+        columns: List[Tuple[str, str]] = [
+            ("Channel", "channel"),
+            ("Name", "name"),
+            ("Target", "target"),
+            ("Date", "date"),
+            ("Location", "location"),
+            ("x", "x"),
+            ("y", "y"),
+            ("RA", "ra"),
+            ("Dec", "dec"),
+        ]
+        self.tree_view.setup_table(columns, 1, "name")
+
+    def update(self, results: Dict[str, Any]) -> None:
+        self._report.update(results)
+        self.tree_view.set_tree(self._report)
+
+
 class Astrometry(LocalPlugin):
     """Ginga plugin for interactive cometary image enhancements.
 
@@ -268,6 +359,8 @@ class Astrometry(LocalPlugin):
         initialization.
         """
 
+        self.fv: GingaShell
+        self.fitsimage: ImageView
         super(Astrometry, self).__init__(fv, fitsimage)
 
         self.layer_tag = "sbpy-astrometry-canvas"
@@ -387,6 +480,71 @@ class Astrometry(LocalPlugin):
     @auto_levels.setter
     def auto_levels(self, value: bool):
         self.w.auto_levels.set_state(value)
+
+    @property
+    def center_dec(self) -> Union[Angle, None]:
+        return self._dec_center
+
+    @center_dec.setter
+    def center_dec(self, value: Union[Angle, None]):
+        self._dec_center = value
+        s = ""
+        if value is not None:
+            s = self._dec_center.to_string("deg", sep=":", precision=2)
+
+        self.w.label_dec_center.set_text(s)
+
+    @property
+    def center_ra(self) -> Union[Angle, None]:
+        return self._ra_center
+
+    @center_ra.setter
+    def center_ra(self, value: Union[Angle, None]):
+        self._ra_center = value
+        s = ""
+        if value is not None:
+            s = self._ra_center.to_string("hourangle", sep=":", precision=2)
+
+        self.w.label_ra_center.set_text(s)
+
+    @property
+    def center_value(self) -> Union[float, None]:
+        return self._center_value
+
+    @center_value.setter
+    def center_value(self, value: Union[float, None]):
+        self._center_value = value
+        s = ""
+        if value is not None:
+            s = f"{value:.6g}"
+
+        self.w.label_center_value.set_text(s)
+
+    @property
+    def center_x(self) -> Union[float, None]:
+        return self._x_center
+
+    @center_x.setter
+    def center_x(self, value: Union[float, None]):
+        self._x_center = value
+        s = ""
+        if value is not None:
+            s = f"{value:.3f}"
+
+        self.w.label_x_center.set_text(s)
+
+    @property
+    def center_y(self) -> Union[float, None]:
+        return self._y_center
+
+    @center_y.setter
+    def center_y(self, value: Union[float, None]):
+        self._y_center = value
+        s = ""
+        if value is not None:
+            s = f"{value:.3f}"
+
+        self.w.label_y_center.set_text(s)
 
     @property
     def date(self) -> str:
@@ -595,7 +753,6 @@ class Astrometry(LocalPlugin):
             self.recenter_region()
 
         bunch.centroid.add_callback("activated", centroid_callback)
-
         bunch.add.set_tooltip("Add this position to the report")
 
         self.w.update(bunch)
@@ -609,7 +766,7 @@ class Astrometry(LocalPlugin):
         self.w.tab_widget = tab_widget
 
         # Metadata tab
-        metadata_vbox = Widgets.VBox()
+        metadata_tab = Widgets.VBox()
         widget = (
             (
                 "Target:",
@@ -658,11 +815,67 @@ class Astrometry(LocalPlugin):
         change_date_callback = self._create_entry_callback("date")
         bunch.date_entry.add_callback("activated", change_date_callback)
 
-        metadata_vbox.add_widget(widget)
-        tab_widget.add_widget(metadata_vbox, title="Metadata")
+        metadata_tab.add_widget(widget)
+        tab_widget.add_widget(metadata_tab, title="Metadata")
+
+        # Report tab
+        report_tab: Widgets.VBox = Widgets.VBox()
+        self.w.report_table = Widgets.TreeView(sortable=True)
+        self.report = AstrometricReport(self.w.report_table)
+
+        def add_to_report_callback(widget) -> None:
+            """Add this position to the report."""
+
+            if self.region is None:
+                return
+
+            image = self.fitsimage.get_image()
+            if image is None:
+                return
+            image_name: str = image.get("name", "")
+
+            data: Dict[str, Any] = {
+                "channel": self.fv.get_channel_name(self.fitsimage),
+                "name": image_name,
+                "target": self.target,
+                "date": self.date,
+                "location": self.observer_location,
+                "x": "" if self.center_x is None else round(self.center_x, 3),
+                "y": "" if self.center_y is None else round(self.center_y, 3),
+                "ra": (
+                    ""
+                    if self.center_ra is None
+                    else self.center_ra.to_string("deg", decimal=True, precision=6)
+                ),
+                "dec": (
+                    ""
+                    if self.center_dec is None
+                    else self.center_dec.to_string("deg", decimal=True, precision=6)
+                ),
+            }
+
+            results: Dict[str, Any] = {}
+            results[image_name] = data
+
+            self.report.update(results)
+
+        button_box: Widgets.HBox = Widgets.HBox()
+        self.w.report_add_button = Widgets.Button("Add")
+        self.w.report_save_button = Widgets.Button("Save")
+        self.w.report_clear_button = Widgets.Button("Clear")
+        self.w.report_add_button.add_callback("activated", add_to_report_callback)
+        self.w.add.add_callback("activated", add_to_report_callback)
+        button_box.add_widget(self.w.report_add_button)
+        button_box.add_widget(self.w.report_save_button)
+        button_box.add_widget(self.w.report_clear_button)
+
+        # End report tab
+        report_tab.add_widget(self.w.report_table, stretch=1)
+        report_tab.add_widget(button_box)
+        tab_widget.add_widget(report_tab, title="Report")
 
         # Settings tab
-        settings_vbox = Widgets.VBox()
+        settings_tab = Widgets.VBox()
         design = (
             (
                 "Region type:",
@@ -795,9 +1008,11 @@ class Astrometry(LocalPlugin):
         # Settings tab: autofill date
         self._setup_header_autofill(bunch, "date")
 
-        # Finish settings tab
-        settings_vbox.add_widget(widget)
-        tab_widget.add_widget(settings_vbox, title="Settings")
+        # End settings tab
+        settings_tab.add_widget(widget)
+        tab_widget.add_widget(settings_tab, title="Settings")
+
+        # End tab widget
         vbox.add_widget(tab_widget)
 
         # scroll bars will allow lots of content to be accessed
@@ -841,25 +1056,31 @@ class Astrometry(LocalPlugin):
     def move_region_peak(self, x: float, y: float) -> None:
         """Move the region's center point and update the labels."""
 
-        self.w.label_x_center.set_text(f"{x:.3f}")
-        self.w.label_y_center.set_text(f"{y:.3f}")
-        self.region.set_center_point(x, y)
-        self.w.label_center_value.set_text(
-            f"{self.region.get_center_point_value():.6g}"
-        )
+        try:
+            self.region.set_center_point(x, y)
+        except RegionImageBoundsError as exception:
+            self.center_x = None
+            self.center_y = None
+            self.center_value = None
+            self.center_ra = None
+            self.center_dec = None
+            self.fv.show_error(str(exception), raisetab=False)
+            return
+
+        self.center_x = x
+        self.center_y = y
+        self.center_value = self.region.get_center_point_value()
 
         vip = self.fitsimage.get_vip()
         image, pt = vip.get_image_at_pt((x, y))
         try:
-            ra_deg, dec_deg = image.pixtoradec(x, y, coords="data")
-            ra_txt, dec_txt = wcs.deg2fmt(ra_deg, dec_deg, "str")
+            ra, dec = image.pixtoradec(x, y, coords="data")
+            self.center_ra = Angle(ra, "deg")
+            self.center_dec = Angle(dec, "deg")
         except Exception as e:
             self.logger.warning("Couldn't calculate sky coordinates: %s" % (str(e)))
-            ra_deg, dec_deg = 0.0, 0.0
-            ra_txt = dec_txt = "BAD WCS"
-
-        self.w.label_ra_center.set_text(ra_txt)
-        self.w.label_dec_center.set_text(dec_txt)
+            self.center_ra = None
+            self.center_dec = None
 
     def recenter_region(self) -> None:
         """Re-center the region peak."""
@@ -944,7 +1165,7 @@ class Astrometry(LocalPlugin):
         self.set_cut_levels()
         self.recenter_region()
 
-    def edit_callback(self, canvas, obj):
+    def edit_callback(self, canvas, obj) -> bool:
         if obj.kind not in self.region_types:
             return True
 
