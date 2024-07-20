@@ -342,6 +342,10 @@ class AstrometricReport:
         self._report.update(results)
         self.tree_view.set_tree(self._report)
 
+    def clear(self) -> None:
+        self.tree_view.clear()
+        self._report = {}
+
 
 class Astrometry(LocalPlugin):
     """Ginga plugin for interactive cometary image enhancements.
@@ -852,8 +856,13 @@ class Astrometry(LocalPlugin):
         self.w.report_add_button = Widgets.Button("Add")
         self.w.report_save_button = Widgets.Button("Save")
         self.w.report_clear_button = Widgets.Button("Clear")
+
         self.w.report_add_button.add_callback("activated", add_to_report_callback)
+        self.w.report_clear_button.add_callback(
+            "activated", lambda widget: self.report.clear()
+        )
         self.w.add.add_callback("activated", add_to_report_callback)
+
         button_box.add_widget(self.w.report_add_button)
         button_box.add_widget(self.w.report_save_button)
         button_box.add_widget(self.w.report_clear_button)
