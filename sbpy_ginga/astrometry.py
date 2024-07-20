@@ -583,7 +583,11 @@ class Astrometry(LocalPlugin):
 
     @property
     def observer_location(self) -> str:
-        return ""
+        return self.w.label_observer_location.get_text()
+
+    @observer_location.setter
+    def observer_location(self, location: str):
+        self.w.label_observer_location.set_text(location)
 
     @property
     def target(self) -> str:
@@ -806,7 +810,7 @@ class Astrometry(LocalPlugin):
         bunch.target_entry.add_callback("activated", change_target_callback)
 
         # Metadata tab: observer location
-        bunch.label_observer_location.set_text(str(self.observer_location))
+        bunch.label_observer_location.set_text("")
         change_observer_location_callback = self._create_entry_callback(
             "observer_location"
         )
