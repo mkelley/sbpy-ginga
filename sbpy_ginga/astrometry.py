@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from astropy.coordinates import Angle
+from astropy.table import Table
+from astropy.time import Time
 
 from ginga.GingaPlugin import LocalPlugin
 from ginga.gw import Widgets
@@ -338,13 +340,22 @@ class AstrometricReport:
         ]
         self.tree_view.setup_table(columns, 1, "name")
 
-    def update(self, results: Dict[str, Any]) -> None:
-        self._report.update(results)
-        self.tree_view.set_tree(self._report)
-
     def clear(self) -> None:
         self.tree_view.clear()
         self._report = {}
+
+    def save(self, filename: str) -> None:
+        """Write ECSV formatted table to this file name."""
+        tab = Table([row for row in self._report.values()])
+        tab["ra"].unit = "deg"
+        tab["dec"].unit = "deg"
+        tab.meta["creator"] = "sbpy-ginga Astrometry tool"
+        tab.meta["creation date"] = Time.now().iso
+        tab.write(filename, format="ascii.ecsv", overwrite=True)
+
+    def update(self, results: Dict[str, Any]) -> None:
+        self._report.update(results)
+        self.tree_view.set_tree(self._report)
 
 
 class Astrometry(LocalPlugin):
@@ -852,20 +863,29 @@ class Astrometry(LocalPlugin):
 
             self.report.update(results)
 
+        def save_report_callback(widget) -> None:
+            """Open file dialog and save report."""
+            dialog = Widgets.SaveDialog(title="Save as...")
+            filename: Union[str, None] = dialog.get_path()
+            if filename is None:
+                return  # cancel
+            self.report.save(filename)
+
         button_box: Widgets.HBox = Widgets.HBox()
         self.w.report_add_button = Widgets.Button("Add")
-        self.w.report_save_button = Widgets.Button("Save")
         self.w.report_clear_button = Widgets.Button("Clear")
+        self.w.report_save_button = Widgets.Button("Save")
 
         self.w.report_add_button.add_callback("activated", add_to_report_callback)
+        self.w.add.add_callback("activated", add_to_report_callback)
         self.w.report_clear_button.add_callback(
             "activated", lambda widget: self.report.clear()
         )
-        self.w.add.add_callback("activated", add_to_report_callback)
+        self.w.report_save_button.add_callback("activated", save_report_callback)
 
         button_box.add_widget(self.w.report_add_button)
-        button_box.add_widget(self.w.report_save_button)
         button_box.add_widget(self.w.report_clear_button)
+        button_box.add_widget(self.w.report_save_button)
 
         # End report tab
         report_tab.add_widget(self.w.report_table, stretch=1)
