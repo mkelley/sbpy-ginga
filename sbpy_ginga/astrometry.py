@@ -328,7 +328,6 @@ class AstrometricReport:
         self._report: Dict[str, Dict[str, Any]] = {}
 
         columns: List[Tuple[str, str]] = [
-            ("Channel", "channel"),
             ("Name", "name"),
             ("Target", "target"),
             ("Date", "date"),
@@ -843,7 +842,6 @@ class Astrometry(LocalPlugin):
             image_name: str = image.get("name", "")
 
             data: Dict[str, Any] = {
-                "channel": self.fv.get_channel_name(self.fitsimage),
                 "name": image_name,
                 "target": self.target,
                 "date": self.date,
